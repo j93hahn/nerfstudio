@@ -27,6 +27,7 @@ from threading import Lock
 from typing import Dict, List, Literal, Optional, Tuple, Type, cast
 
 import torch
+from fabric.utils.event import EventStorage
 from rich import box, style
 from rich.panel import Panel
 from rich.table import Table
@@ -34,11 +35,14 @@ from torch.cuda.amp.grad_scaler import GradScaler
 
 from nerfstudio.configs.experiment_config import ExperimentConfig
 from nerfstudio.data.datamanagers.base_datamanager import VanillaDataManager
-from nerfstudio.engine.callbacks import TrainingCallback, TrainingCallbackAttributes, TrainingCallbackLocation
+from nerfstudio.engine.callbacks import (TrainingCallback,
+                                         TrainingCallbackAttributes,
+                                         TrainingCallbackLocation)
 from nerfstudio.engine.optimizers import Optimizers
 from nerfstudio.pipelines.base_pipeline import VanillaPipeline
 from nerfstudio.utils import profiler, writer
-from nerfstudio.utils.decorators import check_eval_enabled, check_main_thread, check_viewer_enabled
+from nerfstudio.utils.decorators import (check_eval_enabled, check_main_thread,
+                                         check_viewer_enabled)
 from nerfstudio.utils.misc import step_check
 from nerfstudio.utils.rich_utils import CONSOLE
 from nerfstudio.utils.writer import EventName, TimeWriter
@@ -235,7 +239,7 @@ class Trainer:
             )
 
         self._init_viewer_state()
-        with TimeWriter(writer, EventName.TOTAL_TRAIN_TIME):
+        with TimeWriter(writer, EventName.TOTAL_TRAIN_TIME) and EventStorage() as metric:
             num_iterations = self.config.max_num_iterations
             step = 0
             for step in range(self._start_step, self._start_step + num_iterations):
@@ -253,6 +257,8 @@ class Trainer:
 
                         # time the forward pass
                         loss, loss_dict, metrics_dict = self.train_iteration(step)
+                        metric.put_scalars(psnr=metrics_dict["psnr"].item(), total_loss=loss.item())
+                        metric.step()
 
                         # training callbacks after the training iteration
                         for callback in self.callbacks:
