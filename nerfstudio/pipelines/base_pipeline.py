@@ -17,33 +17,31 @@ Abstracts for the Pipeline class.
 """
 from __future__ import annotations
 
+import os
 import typing
 from abc import abstractmethod
 from dataclasses import dataclass, field
+from pathlib import Path
 from time import time
-from typing import Any, Dict, List, Literal, Mapping, Optional, Tuple, Type, Union, cast
+from typing import (Any, Dict, List, Literal, Mapping, Optional, Tuple, Type,
+                    Union, cast)
 
+import numpy as np
 import torch
 import torch.distributed as dist
-from rich.progress import (
-    BarColumn,
-    MofNCompleteColumn,
-    Progress,
-    TextColumn,
-    TimeElapsedColumn,
-)
+from rich.progress import (BarColumn, MofNCompleteColumn, Progress, TextColumn,
+                           TimeElapsedColumn)
 from torch import nn
+from torch.cuda.amp.grad_scaler import GradScaler
 from torch.nn import Parameter
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.cuda.amp.grad_scaler import GradScaler
 
 from nerfstudio.configs import base_config as cfg
-from nerfstudio.data.datamanagers.base_datamanager import (
-    DataManager,
-    DataManagerConfig,
-    VanillaDataManager,
-)
-from nerfstudio.engine.callbacks import TrainingCallback, TrainingCallbackAttributes
+from nerfstudio.data.datamanagers.base_datamanager import (DataManager,
+                                                           DataManagerConfig,
+                                                           VanillaDataManager)
+from nerfstudio.engine.callbacks import (TrainingCallback,
+                                         TrainingCallbackAttributes)
 from nerfstudio.models.base_model import Model, ModelConfig
 from nerfstudio.utils import profiler
 
@@ -175,6 +173,11 @@ class Pipeline(nn.Module):
     @profiler.time_function
     def get_average_eval_image_metrics(self, step: Optional[int] = None):
         """Iterate over all the images in the eval dataset and get the average."""
+
+    @abstractmethod
+    @profiler.time_function
+    def get_eval_image_sigmas(self, step: Optional[int] = None, mode: str = "save", load_xyz_path: Path = Path('None')):
+        """Iterate over all the images in the eval dataset and extract the sigmas."""
 
     def load_pipeline(self, loaded_state: Dict[str, Any], step: int) -> None:
         """Load the checkpoint from the given path
@@ -379,6 +382,54 @@ class VanillaPipeline(Pipeline):
             )
         self.train()
         return metrics_dict
+
+    @profiler.time_function
+    def get_eval_image_sigmas(self, step: Optional[int] = None, mode: str = "save", load_xyz_path: Path = Path('None')):
+        """Iterate over all the images in the eval dataset and extract the sigmas.
+
+        Modeled after the get_average_eval_image_metrics() method.
+
+        Returns:
+            Nothing. Saves the sigmas and xyz_locations in .npy files and outputs a video.
+        """
+        import imageio.v2 as imageio
+        writer = imageio.get_writer(f'sigmas_{Path(os.getcwd()).parts[-1]}.mp4', fps=20)
+
+        self.eval()
+        assert isinstance(self.datamanager, VanillaDataManager)
+        num_images = len(self.datamanager.fixed_indices_eval_dataloader)
+        with Progress(
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TimeElapsedColumn(),
+            MofNCompleteColumn(),
+            transient=True,
+        ) as progress:
+            task = progress.add_task("[green]Evaluating all eval images...", total=num_images)
+            for camera_ray_bundle, batch in self.datamanager.fixed_indices_eval_dataloader:
+                # batch['image_idx'] stores the numerical index of the image in the evaluation dataset
+                # and batch['image'] stores the image in RGB format, with shape [H, W, 3] while
+                # camera_ray_bundle is a RayBundle class storing information about the rays
+                height, width = camera_ray_bundle.shape
+                if mode == 'save':
+                    outputs = self.model.get_sigmas_from_camera_ray_bundle(camera_ray_bundle)
+                    np.save(f'sigmas_pose{batch["image_idx"]}.npy', outputs['sigmas'])
+                    np.save(f'xyz_pose{batch["image_idx"]}.npy', outputs['xyz_positions'])
+                    self.model.create_single_sigma_viz(outputs['sigmas'], batch["image_idx"], height, width)
+                    writer.append_data(imageio.imread(f'sigmas_pose{batch["image_idx"]}.png'))
+                elif mode == 'load':
+                    _xyz_loc = np.load(load_xyz_path / f'xyz_pose{batch["image_idx"]}.npy')
+                    # Pylance will complain about the next line because the base_field.py implementation does not have
+                    # a field parameter, but it is implemented in the derived classes (e.g., nerfacto_field.py)
+                    sigmas = self.model.field.get_density_at_positions(torch.from_numpy(_xyz_loc).to(self.device).reshape(-1, 1, 3))
+                    np.save(f'sigmas_pose{batch["image_idx"]}.npy', sigmas.reshape(height, width))
+                    self.model.create_single_sigma_viz(sigmas, batch["image_idx"], height, width)
+                    writer.append_data(imageio.imread(f'sigmas_pose{batch["image_idx"]}.png'))
+                else:
+                    raise NotImplementedError
+                progress.advance(task)
+        self.train()
+        writer.close()
 
     def load_pipeline(self, loaded_state: Dict[str, Any], step: int) -> None:
         """Load the checkpoint from the given path
