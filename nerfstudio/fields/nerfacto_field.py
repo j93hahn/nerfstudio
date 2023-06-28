@@ -20,21 +20,21 @@ Field for compound nerf model, adds scene contraction and image embeddings to in
 from typing import Dict, Literal, Optional, Tuple
 
 import torch
+from jaxtyping import Shaped
 from torch import Tensor, nn
 
 from nerfstudio.cameras.rays import RaySamples
 from nerfstudio.data.scene_box import SceneBox
 from nerfstudio.field_components.activations import trunc_exp
 from nerfstudio.field_components.embedding import Embedding
-from nerfstudio.field_components.encodings import HashEncoding, NeRFEncoding, SHEncoding
-from nerfstudio.field_components.field_heads import (
-    FieldHeadNames,
-    PredNormalsFieldHead,
-    SemanticFieldHead,
-    TransientDensityFieldHead,
-    TransientRGBFieldHead,
-    UncertaintyFieldHead,
-)
+from nerfstudio.field_components.encodings import (HashEncoding, NeRFEncoding,
+                                                   SHEncoding)
+from nerfstudio.field_components.field_heads import (FieldHeadNames,
+                                                     PredNormalsFieldHead,
+                                                     SemanticFieldHead,
+                                                     TransientDensityFieldHead,
+                                                     TransientRGBFieldHead,
+                                                     UncertaintyFieldHead)
 from nerfstudio.field_components.mlp import MLP
 from nerfstudio.field_components.spatial_distortions import SpatialDistortion
 from nerfstudio.fields.base_field import Field, shift_directions_for_tcnn
@@ -223,6 +223,20 @@ class NerfactoField(Field):
         density = trunc_exp(density_before_activation.to(positions))
         density = density * selector[..., None]
         return density, base_mlp_out
+
+    def get_density_at_positions(self, positions: Shaped[Tensor, "*batch 1 3"]) -> Tensor:
+        # Make sure the tcnn gets inputs between 0 and 1. N_samples = 1 in this function as
+        # we have boiled down each ray to a single point that we want to compute the sigma value
+        # at, via the TCNN.
+        selector = ((positions > 0.0) & (positions < 1.0)).all(dim=-1)  # [N_rays, 1]
+        positions = positions * selector[..., None]                     # [N_rays, 1, 3]
+        positions_flat = positions.view(-1, 3)                          # [N_rays * 1, 3]
+        h = self.mlp_base(positions_flat).view(positions_flat.shape[0], 1, -1)  # [N_rays * 1, 1 + self.geo_feat_dim]
+        density_before_activation, _ = torch.split(h, [1, self.geo_feat_dim], dim=-1)
+
+        density = trunc_exp(density_before_activation.to(positions))    # [N_rays, 1, 1]
+        density = density * selector[..., None]                         # [N_rays, 1, 1]
+        return density.squeeze().detach().cpu().numpy()                 # [N_rays]
 
     def get_outputs(
         self, ray_samples: RaySamples, density_embedding: Optional[Tensor] = None
