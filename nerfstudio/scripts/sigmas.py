@@ -54,7 +54,7 @@ class RenderSigmas:
             mode = 'save'
 
         _, pipeline, _, _ = eval_setup(self.load_config)
-        pipeline.get_eval_image_sigmas(mode=mode, load_xyz_path=self.load_xyz_path)
+        pipeline.get_eval_image_sigma_viz(mode=mode, load_xyz_path=self.load_xyz_path)
 
 
 def entrypoint():

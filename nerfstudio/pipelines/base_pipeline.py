@@ -176,7 +176,7 @@ class Pipeline(nn.Module):
 
     @abstractmethod
     @profiler.time_function
-    def get_eval_image_sigmas(self, step: Optional[int] = None, mode: str = "save", load_xyz_path: Path = Path('None')):
+    def get_eval_image_sigma_viz(self, step: Optional[int] = None, mode: str = "save", load_xyz_path: Path = Path('None')):
         """Iterate over all the images in the eval dataset and extract the sigmas."""
 
     def load_pipeline(self, loaded_state: Dict[str, Any], step: int) -> None:
@@ -384,7 +384,7 @@ class VanillaPipeline(Pipeline):
         return metrics_dict
 
     @profiler.time_function
-    def get_eval_image_sigmas(self, step: Optional[int] = None, mode: str = "save", load_xyz_path: Path = Path('None')):
+    def get_eval_image_sigma_viz(self, step: Optional[int] = None, mode: str = "save", load_xyz_path: Path = Path('None')):
         """Iterate over all the images in the eval dataset and extract the sigmas.
 
         Modeled after the get_average_eval_image_metrics() method.
