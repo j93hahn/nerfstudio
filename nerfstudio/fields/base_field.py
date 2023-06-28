@@ -77,6 +77,16 @@ class Field(nn.Module):
             ray_samples: Samples locations to compute density.
         """
 
+    @abstractmethod
+    def get_density_at_positions(
+        self, positions: Shaped[Tensor, "*batch 3"]
+    ) -> Shaped[Tensor, "*batch 1"]:
+        """Computes and returns the densities at the given normalized xyz locations. Returns a tensor of densities.
+
+        Args:
+            positions: Samples locations to compute density.
+        """
+
     def get_normals(self) -> Float[Tensor, "*batch 3"]:
         """Computes and returns a tensor of normals.
 
