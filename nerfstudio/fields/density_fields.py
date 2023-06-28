@@ -20,6 +20,7 @@ Proposal network field.
 from typing import Literal, Optional, Tuple
 
 import torch
+import torch.nn.functional as F
 from torch import Tensor, nn
 
 from nerfstudio.cameras.rays import RaySamples
@@ -57,11 +58,13 @@ class HashMLPDensityField(Field):
         log2_hashmap_size: int = 18,
         features_per_level: int = 2,
         implementation: Literal["tcnn", "torch"] = "torch",
+        fea2denseAct: Literal["trunc_exp", "exp", "softplus", "relu", "sigmoid"] = "trunc_exp",
     ) -> None:
         super().__init__()
         self.register_buffer("aabb", aabb)
         self.spatial_distortion = spatial_distortion
         self.use_linear = use_linear
+        self.fea2denseAct = fea2denseAct
 
         self.register_buffer("max_res", torch.tensor(max_res))
         self.register_buffer("num_levels", torch.tensor(num_levels))
@@ -111,7 +114,17 @@ class HashMLPDensityField(Field):
         # Rectifying the density with an exponential is much more stable than a ReLU or
         # softplus, because it enables high post-activation (float32) density outputs
         # from smaller internal (float16) parameters.
-        density = trunc_exp(density_before_activation)
+        density = None
+        if self.fea2denseAct == "trunc_exp":
+            density = trunc_exp(density_before_activation.to(positions))
+        elif self.fea2denseAct == "exp":
+            density = torch.exp(density_before_activation.to(positions))
+        elif self.fea2denseAct == "softplus":
+            density = F.softplus(density_before_activation.to(positions))
+        elif self.fea2denseAct == "relu":
+            density = F.relu(density_before_activation.to(positions))
+        elif self.fea2denseAct == "sigmoid":
+            density = torch.sigmoid(density_before_activation.to(positions))
         density = density * selector[..., None]
         return density, None
 

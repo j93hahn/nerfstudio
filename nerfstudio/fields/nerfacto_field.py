@@ -20,6 +20,7 @@ Field for compound nerf model, adds scene contraction and image embeddings to in
 from typing import Dict, Literal, Optional, Tuple
 
 import torch
+import torch.nn.functional as F
 from jaxtyping import Shaped
 from torch import Tensor, nn
 
@@ -94,6 +95,7 @@ class NerfactoField(Field):
         use_average_appearance_embedding: bool = False,
         spatial_distortion: Optional[SpatialDistortion] = None,
         implementation: Literal["tcnn", "torch"] = "tcnn",
+        fea2denseAct: Literal["trunc_exp", "exp", "softplus", "relu", "sigmoid"] = "trunc_exp",
     ) -> None:
         super().__init__()
 
@@ -114,6 +116,7 @@ class NerfactoField(Field):
         self.use_pred_normals = use_pred_normals
         self.pass_semantic_gradients = pass_semantic_gradients
         self.base_res = base_res
+        self.fea2denseAct = fea2denseAct
 
         self.direction_encoding = SHEncoding(
             levels=4,
@@ -220,7 +223,17 @@ class NerfactoField(Field):
         # Rectifying the density with an exponential is much more stable than a ReLU or
         # softplus, because it enables high post-activation (float32) density outputs
         # from smaller internal (float16) parameters.
-        density = trunc_exp(density_before_activation.to(positions))
+        density = None
+        if self.fea2denseAct == "trunc_exp":
+            density = trunc_exp(density_before_activation.to(positions))
+        elif self.fea2denseAct == "exp":
+            density = torch.exp(density_before_activation.to(positions))
+        elif self.fea2denseAct == "softplus":
+            density = F.softplus(density_before_activation.to(positions))
+        elif self.fea2denseAct == "relu":
+            density = F.relu(density_before_activation.to(positions))
+        elif self.fea2denseAct == "sigmoid":
+            density = torch.sigmoid(density_before_activation.to(positions))
         density = density * selector[..., None]
         return density, base_mlp_out
 
@@ -234,7 +247,17 @@ class NerfactoField(Field):
         h = self.mlp_base(positions_flat).view(positions_flat.shape[0], 1, -1)  # [N_rays * 1, 1 + self.geo_feat_dim]
         density_before_activation, _ = torch.split(h, [1, self.geo_feat_dim], dim=-1)
 
-        density = trunc_exp(density_before_activation.to(positions))    # [N_rays, 1, 1]
+        density = None                                                  # [N_rays, 1, 1]
+        if self.fea2denseAct == "trunc_exp":
+            density = trunc_exp(density_before_activation.to(positions))
+        elif self.fea2denseAct == "exp":
+            density = torch.exp(density_before_activation.to(positions))
+        elif self.fea2denseAct == "softplus":
+            density = F.softplus(density_before_activation.to(positions))
+        elif self.fea2denseAct == "relu":
+            density = F.relu(density_before_activation.to(positions))
+        elif self.fea2denseAct == "sigmoid":
+            density = torch.sigmoid(density_before_activation.to(positions))
         density = density * selector[..., None]                         # [N_rays, 1, 1]
         return density.squeeze().detach().cpu().numpy()                 # [N_rays]
 

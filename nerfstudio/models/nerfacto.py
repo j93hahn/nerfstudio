@@ -128,6 +128,8 @@ class NerfactoModelConfig(ModelConfig):
     """Which implementation to use for the model."""
     appearance_embed_dim: int = 32
     """Dimension of the appearance embedding."""
+    fea2denseAct: Literal["trunc_exp", "exp", "softplus", "relu", "sigmoid"] = "trunc_exp"
+    """Activation function for the density values."""
 
 
 class NerfactoModel(Model):
@@ -163,6 +165,7 @@ class NerfactoModel(Model):
             use_average_appearance_embedding=self.config.use_average_appearance_embedding,
             appearance_embedding_dim=self.config.appearance_embed_dim,
             implementation=self.config.implementation,
+            fea2denseAct=self.config.fea2denseAct,
         )
 
         self.density_fns = []
@@ -177,6 +180,7 @@ class NerfactoModel(Model):
                 spatial_distortion=scene_contraction,
                 **prop_net_args,
                 implementation=self.config.implementation,
+                fea2denseAct=self.config.fea2denseAct,
             )
             self.proposal_networks.append(network)
             self.density_fns.extend([network.density_fn for _ in range(num_prop_nets)])
@@ -188,6 +192,7 @@ class NerfactoModel(Model):
                     spatial_distortion=scene_contraction,
                     **prop_net_args,
                     implementation=self.config.implementation,
+                    fea2denseAct=self.config.fea2denseAct,
                 )
                 self.proposal_networks.append(network)
             self.density_fns.extend([network.density_fn for network in self.proposal_networks])
