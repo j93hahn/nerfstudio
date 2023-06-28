@@ -130,6 +130,8 @@ class NerfactoModelConfig(ModelConfig):
     """Dimension of the appearance embedding."""
     fea2denseAct: Literal["trunc_exp", "exp", "softplus", "relu", "sigmoid"] = "trunc_exp"
     """Activation function for the density values."""
+    distance_scale: float = 1.0
+    """Scalar on the distances in the volumetric rendering equation."""
 
 
 class NerfactoModel(Model):
@@ -167,6 +169,8 @@ class NerfactoModel(Model):
             implementation=self.config.implementation,
             fea2denseAct=self.config.fea2denseAct,
         )
+
+        self.distance_scale = self.config.distance_scale
 
         self.density_fns = []
         num_prop_nets = self.config.num_proposal_iterations
@@ -217,6 +221,7 @@ class NerfactoModel(Model):
             single_jitter=self.config.use_single_jitter,
             update_sched=update_schedule,
             initial_sampler=initial_sampler,
+            distance_scale=self.distance_scale,
         )
 
         # Collider
@@ -286,7 +291,7 @@ class NerfactoModel(Model):
         if self.config.use_gradient_scaling:
             field_outputs = scale_gradients_by_distance_squared(field_outputs, ray_samples)
 
-        weights = ray_samples.get_weights(field_outputs[FieldHeadNames.DENSITY])
+        weights = ray_samples.get_weights(field_outputs[FieldHeadNames.DENSITY], distance_scale=self.distance_scale)
         weights_list.append(weights)
         ray_samples_list.append(ray_samples)
 
@@ -333,7 +338,7 @@ class NerfactoModel(Model):
         if self.config.use_gradient_scaling:
             field_outputs = scale_gradients_by_distance_squared(field_outputs, ray_samples)
 
-        weights = ray_samples.get_weights(field_outputs[FieldHeadNames.DENSITY])
+        weights = ray_samples.get_weights(field_outputs[FieldHeadNames.DENSITY], distance_scale=self.distance_scale)
 
         # normalize coordinates according to whether we have spatial distortion or not
         if self.field.spatial_distortion is not None:

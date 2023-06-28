@@ -121,11 +121,14 @@ class RaySamples(TensorDataclass):
     """Function to convert bins to euclidean distance."""
     metadata: Optional[Dict[str, Shaped[Tensor, "*bs latent_dims"]]] = None
     """additional information relevant to generating ray samples"""
-
     times: Optional[Float[Tensor, "*batch 1"]] = None
     """Times at which rays are sampled"""
 
-    def get_weights(self, densities: Float[Tensor, "*batch num_samples 1"]) -> Float[Tensor, "*batch num_samples 1"]:
+    def get_weights(
+        self,
+        densities: Float[Tensor, "*batch num_samples 1"],
+        distance_scale: float = 1.0,
+    ) -> Float[Tensor, "*batch num_samples 1"]:
         """Return weights based on predicted densities
 
         Args:
@@ -135,8 +138,8 @@ class RaySamples(TensorDataclass):
             Weights for each sample
         """
 
-        delta_density = self.deltas * densities
-        alphas = 1 - torch.exp(-delta_density)
+        delta_density = self.deltas * densities * distance_scale
+        alphas = 1. - torch.exp(-delta_density)
 
         transmittance = torch.cumsum(delta_density[..., :-1, :], dim=-2)
         transmittance = torch.cat(

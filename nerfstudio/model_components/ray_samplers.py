@@ -541,6 +541,7 @@ class ProposalNetworkSampler(Sampler):
         single_jitter: bool = False,
         update_sched: Callable = lambda x: 1,
         initial_sampler: Optional[Sampler] = None,
+        distance_scale: float = 1.0,
     ) -> None:
         super().__init__()
         self.num_proposal_samples_per_ray = num_proposal_samples_per_ray
@@ -560,6 +561,7 @@ class ProposalNetworkSampler(Sampler):
         self._anneal = 1.0
         self._steps_since_update = 0
         self._step = 0
+        self.distance_scale = distance_scale
 
     def set_anneal(self, anneal: float) -> None:
         """Set the anneal value for the proposal network."""
@@ -604,7 +606,7 @@ class ProposalNetworkSampler(Sampler):
                 else:
                     with torch.no_grad():
                         density = density_fns[i_level](ray_samples.frustums.get_positions())
-                weights = ray_samples.get_weights(density)
+                weights = ray_samples.get_weights(density, distance_scale=self.distance_scale)
                 weights_list.append(weights)  # (num_rays, num_samples)
                 ray_samples_list.append(ray_samples)
         if updated:
