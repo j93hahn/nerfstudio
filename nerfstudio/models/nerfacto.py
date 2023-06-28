@@ -29,6 +29,7 @@ from torchmetrics.functional import structural_similarity_index_measure
 from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 
 from nerfstudio.cameras.rays import RayBundle, RaySamples
+from nerfstudio.data.scene_box import SceneBox
 from nerfstudio.engine.callbacks import (TrainingCallback,
                                          TrainingCallbackAttributes,
                                          TrainingCallbackLocation)
@@ -317,6 +318,37 @@ class NerfactoModel(Model):
 
         for i in range(self.config.num_proposal_iterations):
             outputs[f"prop_depth_{i}"] = self.renderer_depth(weights=weights_list[i], ray_samples=ray_samples_list[i])
+
+        return outputs
+
+    def get_sigmas(self, ray_bundle: RayBundle):
+        ray_samples: RaySamples
+        ray_samples, _, _ = self.proposal_sampler(ray_bundle, density_fns=self.density_fns)
+        field_outputs = self.field.forward(ray_samples, compute_normals=self.config.predict_normals)
+        if self.config.use_gradient_scaling:
+            field_outputs = scale_gradients_by_distance_squared(field_outputs, ray_samples)
+
+        weights = ray_samples.get_weights(field_outputs[FieldHeadNames.DENSITY])
+
+        # normalize coordinates according to whether we have spatial distortion or not
+        if self.field.spatial_distortion is not None:
+            positions = ray_samples.frustums.get_positions()
+            positions = self.field.spatial_distortion(positions)
+            positions = (positions + 2.0) / 4.0
+        else:
+            positions = SceneBox.get_normalized_positions(ray_samples.frustums.get_positions(), self.field.aabb)
+
+        _, weights, sigmas, positions = self.viz_histograms(
+            weights.squeeze().cpu().numpy(),
+            field_outputs[FieldHeadNames.DENSITY].squeeze().cpu().numpy(),
+            positions.squeeze().cpu().numpy()
+        )
+
+        outputs = {
+            "weights": weights,
+            "sigmas": sigmas,
+            "xyz_positions": positions
+        }
 
         return outputs
 
