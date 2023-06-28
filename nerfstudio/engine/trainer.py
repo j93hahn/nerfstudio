@@ -88,6 +88,8 @@ class TrainerConfig(ExperimentConfig):
     """Optionally log gradients during training"""
     gradient_accumulation_steps: int = 1
     """Number of steps to accumulate gradients over."""
+    test_mode: Literal["test", "val", "inference"] = "val"
+    """Whether to run in test or val mode."""
 
 
 class Trainer:
@@ -140,18 +142,16 @@ class Trainer:
 
         self.viewer_state = None
 
-    def setup(self, test_mode: Literal["test", "val", "inference"] = "val") -> None:
-        """Setup the Trainer by calling other setup functions.
+    def setup(self) -> None:
+        """Setup the Trainer by calling other setup functions."""
 
-        Args:
-            test_mode:
-                'val': loads train/val datasets into memory
-                'test': loads train/test datasets into memory
-                'inference': does not load any dataset into memory
-        """
+        # test_mode:
+        #     'val': loads train/val datasets into memory
+        #     'test': loads train/test datasets into memory
+        #     'inference': does not load any dataset into memory
         self.pipeline = self.config.pipeline.setup(
             device=self.device,
-            test_mode=test_mode,
+            test_mode=self.config.test_mode,
             world_size=self.world_size,
             local_rank=self.local_rank,
             grad_scaler=self.grad_scaler,
