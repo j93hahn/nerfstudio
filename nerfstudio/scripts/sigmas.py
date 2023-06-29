@@ -41,6 +41,8 @@ class RenderSigmas:
     load_xyz: bool = False
     # Path to the xyz locations to load from disk.
     load_xyz_path: Path = Path('None')
+    # Frames per second for the movie.
+    fps: int = 20
 
     def main(self) -> None:
         """Main function."""
@@ -54,7 +56,7 @@ class RenderSigmas:
             mode = 'save'
 
         _, pipeline, _, _ = eval_setup(self.load_config)
-        pipeline.get_eval_image_sigma_viz(mode=mode, load_xyz_path=self.load_xyz_path)
+        pipeline.get_eval_image_sigma_viz(mode=mode, load_xyz_path=self.load_xyz_path, fps=self.fps)
 
 
 def entrypoint():

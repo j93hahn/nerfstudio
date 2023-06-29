@@ -176,7 +176,7 @@ class Pipeline(nn.Module):
 
     @abstractmethod
     @profiler.time_function
-    def get_eval_image_sigma_viz(self, step: Optional[int] = None, mode: str = "save", load_xyz_path: Path = Path('None')):
+    def get_eval_image_sigma_viz(self, step: Optional[int] = None, mode: str = "save", load_xyz_path: Path = Path('None'), fps: int = 30):
         """Iterate over all the images in the eval dataset and extract the sigmas."""
 
     def load_pipeline(self, loaded_state: Dict[str, Any], step: int) -> None:
@@ -384,7 +384,13 @@ class VanillaPipeline(Pipeline):
         return metrics_dict
 
     @profiler.time_function
-    def get_eval_image_sigma_viz(self, step: Optional[int] = None, mode: str = "save", load_xyz_path: Path = Path('None')):
+    def get_eval_image_sigma_viz(
+        self,
+        step: Optional[int] = None,
+        mode: str = "save",
+        load_xyz_path: Path = Path('None'),
+        fps: int = 20,
+    ):
         """Iterate over all the images in the eval dataset and extract the sigmas.
 
         Modeled after the get_average_eval_image_metrics() method.
@@ -393,7 +399,7 @@ class VanillaPipeline(Pipeline):
             Nothing. Saves the sigmas and xyz_locations in .npy files and outputs a video.
         """
         import imageio.v2 as imageio
-        writer = imageio.get_writer(f'sigmas_{Path(os.getcwd()).parts[-1]}.mp4', fps=20)
+        writer = imageio.get_writer(f'sigmas_{Path(os.getcwd()).parts[-1]}.mp4', fps=fps)
 
         self.eval()
         assert isinstance(self.datamanager, VanillaDataManager)
