@@ -27,7 +27,7 @@ from threading import Lock
 from typing import Dict, List, Literal, Optional, Tuple, Type, cast
 
 import torch
-from fabric.utils.event import EventStorage
+from fabric.utils.event import EventStorage, get_event_storage
 from rich import box, style
 from rich.panel import Panel
 from rich.table import Table
@@ -257,8 +257,7 @@ class Trainer:
 
                         # time the forward pass
                         loss, loss_dict, metrics_dict = self.train_iteration(step)
-                        metric.put_scalars(psnr=metrics_dict["psnr"].item(), total_loss=loss.item())
-                        metric.step()
+                        metric.put_scalars(psnr=metrics_dict["psnr"].item(), loss=loss.item())
 
                         # training callbacks after the training iteration
                         for callback in self.callbacks:
@@ -301,6 +300,7 @@ class Trainer:
                     self.save_checkpoint(step)
 
                 writer.write_out_storage()
+                metric.step()
 
         # save checkpoint at the end of training
         self.save_checkpoint(step)
@@ -530,5 +530,7 @@ class Trainer:
 
         # all eval images
         if step_check(step, self.config.steps_per_eval_all_images):
+            metric = get_event_storage()
             metrics_dict = self.pipeline.get_average_eval_image_metrics(step=step)
+            metric.put_scalars(test_psnr=metrics_dict["psnr"])
             writer.put_dict(name="Eval Images Metrics Dict (all images)", scalar_dict=metrics_dict, step=step)
