@@ -119,7 +119,7 @@ class NerfactoField(Field):
         self.base_res = base_res
         self.fea2denseAct = fea2denseAct
 
-        # interval length for blender is 0.0156
+        # empirically, interval length for both bounded scenes and scenes with contraction are close to 0.0156
         self._calculate_density_shift(0.0156, distance_scale)
 
         self.direction_encoding = SHEncoding(
@@ -217,6 +217,7 @@ class NerfactoField(Field):
         sigma_init = torch.tensor(sigma_init)
         distance_shift = torch.tensor(-interval * distance_scale)
         self.density_shift = torch.log(torch.log(1.0 - alpha_init) / distance_shift) - sigma_init
+        print(f"setting density shift to {self.density_shift}")
 
     def get_density(self, ray_samples: RaySamples) -> Tuple[Tensor, Tensor]:
         """Computes and returns the densities."""
