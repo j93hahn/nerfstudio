@@ -96,6 +96,7 @@ class NerfactoField(Field):
         spatial_distortion: Optional[SpatialDistortion] = None,
         implementation: Literal["tcnn", "torch"] = "tcnn",
         fea2denseAct: Literal["trunc_exp", "exp", "softplus", "relu", "sigmoid"] = "trunc_exp",
+        distance_scale: float = 1.0,
     ) -> None:
         super().__init__()
 
@@ -117,6 +118,9 @@ class NerfactoField(Field):
         self.pass_semantic_gradients = pass_semantic_gradients
         self.base_res = base_res
         self.fea2denseAct = fea2denseAct
+
+        # interval length for blender is 0.0156
+        self._calculate_density_shift(0.0156, distance_scale)
 
         self.direction_encoding = SHEncoding(
             levels=4,
@@ -201,6 +205,19 @@ class NerfactoField(Field):
             implementation=implementation,
         )
 
+    def _calculate_density_shift(self, interval, distance_scale, alpha_init=1e-3, sigma_init=1e-6):
+        """
+        New method: Calculates the density shift to be applied to the density output of the TCNN encoding
+        before it is passed to the activation function.
+
+        sigma_init is the mean value of the initial sigma values outputted by the TCNN hashgrid/MLP encoding
+        - empirically, I find it to be on the numerical range of 1e-6
+        """
+        alpha_init = torch.tensor(alpha_init)
+        sigma_init = torch.tensor(sigma_init)
+        distance_shift = torch.tensor(-interval * distance_scale)
+        self.density_shift = torch.log(torch.log(1.0 - alpha_init) / distance_shift) - sigma_init
+
     def get_density(self, ray_samples: RaySamples) -> Tuple[Tensor, Tensor]:
         """Computes and returns the densities."""
         if self.spatial_distortion is not None:
@@ -216,24 +233,25 @@ class NerfactoField(Field):
         if not self._sample_locations.requires_grad:
             self._sample_locations.requires_grad = True
         positions_flat = positions.view(-1, 3)
-        h = self.mlp_base(positions_flat).view(*ray_samples.frustums.shape, -1)
+        h = self.mlp_base(positions_flat).view(*ray_samples.frustums.shape, -1)     # initially outputs values on numerical range of 1e-6
         density_before_activation, base_mlp_out = torch.split(h, [1, self.geo_feat_dim], dim=-1)
-        self._density_before_activation = density_before_activation
+        _density_before_activation = density_before_activation.clone() + self.density_shift
+        self._density_before_activation = _density_before_activation
 
         # Rectifying the density with an exponential is much more stable than a ReLU or
         # softplus, because it enables high post-activation (float32) density outputs
         # from smaller internal (float16) parameters.
         density = None
         if self.fea2denseAct == "trunc_exp":
-            density = trunc_exp(density_before_activation.to(positions))
+            density = trunc_exp(_density_before_activation.to(positions))
         elif self.fea2denseAct == "exp":
-            density = torch.exp(density_before_activation.to(positions))
+            density = torch.exp(_density_before_activation.to(positions))
         elif self.fea2denseAct == "softplus":
-            density = F.softplus(density_before_activation.to(positions))
+            density = F.softplus(_density_before_activation.to(positions))
         elif self.fea2denseAct == "relu":
-            density = F.relu(density_before_activation.to(positions))
+            density = F.relu(_density_before_activation.to(positions))
         elif self.fea2denseAct == "sigmoid":
-            density = torch.sigmoid(density_before_activation.to(positions))
+            density = torch.sigmoid(_density_before_activation.to(positions))
         density = density * selector[..., None]
         return density, base_mlp_out
 
