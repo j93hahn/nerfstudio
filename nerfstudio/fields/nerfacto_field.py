@@ -240,7 +240,7 @@ class NerfactoField(Field):
     def get_density_at_positions(self, positions: Shaped[Tensor, "*batch 1 3"]) -> Tensor:
         # Make sure the tcnn gets inputs between 0 and 1. N_samples = 1 in this function as
         # we have boiled down each ray to a single point that we want to compute the sigma value
-        # at, via the TCNN.
+        # at, via the TCNN. <<<<< USED TO QUERY SIGMA VALUES >>>>>
         selector = ((positions > 0.0) & (positions < 1.0)).all(dim=-1)  # [N_rays, 1]
         positions = positions * selector[..., None]                     # [N_rays, 1, 3]
         positions_flat = positions.view(-1, 3)                          # [N_rays * 1, 3]
