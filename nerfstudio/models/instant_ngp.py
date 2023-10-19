@@ -23,27 +23,23 @@ from typing import Dict, List, Literal, Optional, Tuple, Type
 
 import nerfacc
 import torch
+from torch import Tensor
 from torch.nn import Parameter
 from torchmetrics import PeakSignalNoiseRatio
 from torchmetrics.functional import structural_similarity_index_measure
 from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 
 from nerfstudio.cameras.rays import RayBundle
-from nerfstudio.engine.callbacks import (
-    TrainingCallback,
-    TrainingCallbackAttributes,
-    TrainingCallbackLocation,
-)
+from nerfstudio.engine.callbacks import (TrainingCallback,
+                                         TrainingCallbackAttributes,
+                                         TrainingCallbackLocation)
 from nerfstudio.field_components.field_heads import FieldHeadNames
 from nerfstudio.field_components.spatial_distortions import SceneContraction
 from nerfstudio.fields.nerfacto_field import NerfactoField
 from nerfstudio.model_components.losses import MSELoss
 from nerfstudio.model_components.ray_samplers import VolumetricSampler
-from nerfstudio.model_components.renderers import (
-    AccumulationRenderer,
-    DepthRenderer,
-    RGBRenderer,
-)
+from nerfstudio.model_components.renderers import (AccumulationRenderer,
+                                                   DepthRenderer, RGBRenderer)
 from nerfstudio.models.base_model import Model, ModelConfig
 from nerfstudio.utils import colormaps
 
@@ -84,6 +80,10 @@ class InstantNGPModelConfig(ModelConfig):
     """The color that is given to untrained areas."""
     disable_scene_contraction: bool = False
     """Whether to disable scene contraction or not."""
+    distance_scale: float = 1.0
+    """Scalar on the distances in the volumetric rendering equation."""
+    use_density_shift: bool = False
+    """Scale the density values with some initial offset."""
 
 
 class NGPModel(Model):
@@ -114,7 +114,11 @@ class NGPModel(Model):
             log2_hashmap_size=self.config.log2_hashmap_size,
             max_res=self.config.max_res,
             spatial_distortion=scene_contraction,
+            distance_scale=self.config.distance_scale,
+            use_density_shift=self.config.use_density_shift
         )
+
+        self.distance_scale = self.config.distance_scale
 
         self.scene_aabb = Parameter(self.scene_box.aabb.flatten(), requires_grad=False)
 
@@ -189,10 +193,12 @@ class NGPModel(Model):
 
         # accumulation
         packed_info = nerfacc.pack_info(ray_indices, num_rays)
-        weights = nerfacc.render_weight_from_density(
+        # updated volumetric rendering code from nerfacc with scene scaling
+        weights = render_weight_from_density(
             t_starts=ray_samples.frustums.starts[..., 0],
             t_ends=ray_samples.frustums.ends[..., 0],
             sigmas=field_outputs[FieldHeadNames.DENSITY][..., 0],
+            distance_scale = self.distance_scale,
             packed_info=packed_info,
         )[0]
         weights = weights[..., None]
@@ -263,3 +269,29 @@ class NGPModel(Model):
         }
 
         return metrics_dict, images_dict
+
+
+"""
+Nerfacc code for rendering weights from density values.
+"""
+def render_weight_from_density(
+    t_starts: Tensor,
+    t_ends: Tensor,
+    sigmas: Tensor,
+    distance_scale: float = 1.0,
+    packed_info: Optional[Tensor] = None,
+    ray_indices: Optional[Tensor] = None,
+    n_rays: Optional[int] = None,
+    prefix_trans: Optional[Tensor] = None,
+) -> Tuple[Tensor, Tensor, Tensor]:
+    if ray_indices is not None and packed_info is None:
+        packed_info = nerfacc.pack_info(ray_indices, n_rays)
+
+    sigmas_dt = sigmas * (t_ends - t_starts) * distance_scale
+    alphas = 1.0 - torch.exp(-sigmas_dt)
+    trans = torch.exp(-nerfacc.exclusive_sum(sigmas_dt, packed_info))
+    if prefix_trans is not None:
+        trans *= prefix_trans
+
+    weights = trans * alphas
+    return weights, trans, alphas

@@ -97,6 +97,7 @@ class NerfactoField(Field):
         implementation: Literal["tcnn", "torch"] = "tcnn",
         fea2denseAct: Literal["trunc_exp", "exp", "softplus", "relu", "sigmoid"] = "trunc_exp",
         distance_scale: float = 1.0,
+        use_density_shift: bool = True
     ) -> None:
         super().__init__()
 
@@ -120,7 +121,7 @@ class NerfactoField(Field):
         self.fea2denseAct = fea2denseAct
 
         # empirically, interval length for both bounded scenes and scenes with contraction are close to 0.0156
-        self._calculate_density_shift(0.0156, distance_scale)
+        self._calculate_density_shift(0.0156, distance_scale, use_density_shift=use_density_shift)
 
         self.direction_encoding = SHEncoding(
             levels=4,
@@ -205,7 +206,7 @@ class NerfactoField(Field):
             implementation=implementation,
         )
 
-    def _calculate_density_shift(self, interval, distance_scale, alpha_init=1e-3, sigma_init=1e-6):
+    def _calculate_density_shift(self, interval, distance_scale, use_density_shift=True, alpha_init=1e-3, sigma_init=1e-6):
         """
         New method: Calculates the density shift to be applied to the density output of the TCNN encoding
         before it is passed to the activation function.
@@ -213,11 +214,14 @@ class NerfactoField(Field):
         sigma_init is the mean value of the initial sigma values outputted by the TCNN hashgrid/MLP encoding
         - empirically, I find it to be on the numerical range of 1e-6
         """
-        alpha_init = torch.tensor(alpha_init)
-        sigma_init = torch.tensor(sigma_init)
-        distance_shift = torch.tensor(-interval * distance_scale)
-        self.density_shift = torch.log(torch.log(1.0 - alpha_init) / distance_shift) - sigma_init
-        print(f"setting density shift to {self.density_shift}")
+        if not use_density_shift:
+            self.density_shift = 0
+        else:
+            alpha_init = torch.tensor(alpha_init)
+            sigma_init = torch.tensor(sigma_init)
+            distance_shift = torch.tensor(-interval * distance_scale)
+            self.density_shift = torch.log(torch.log(1.0 - alpha_init) / distance_shift) - sigma_init
+        print(f"Setting density shift to {self.density_shift} with distance scale {distance_scale}")
 
     def get_density(self, ray_samples: RaySamples) -> Tuple[Tensor, Tensor]:
         """Computes and returns the densities."""
